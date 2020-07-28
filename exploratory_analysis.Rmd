@@ -1,0 +1,162 @@
+---
+title: "TBD"
+output:
+  html_document:
+    df_print: paged
+---
+
+```{r message=FALSE, warning=FALSE}
+library(dplyr)
+library(ggplot2)
+
+housing <- read.csv('housing.csv')
+```
+
+# Introduction
+
+Proejct prompt (to be removed prior to submitting):
+
+>The introduction section should relay what you are attempting to accomplish. It would include a statement of the business, science, research, or personal interest you have that leads to analyzing the data you’ve chosen. It should provide enough background to your work such that a reader would not need to load your data to understand your report. Like the simulation project, you can assume the reader is familiar with the course concepts, >but not your data. Some things to consider:
+
+>What is this data? Where did it come from? What are the variables? Why is it interesting to you?
+>Why are you creating a model for this data? What is the goal of this model?
+
+This dataset was accessed from the [Kaggle.com dataset repository](https://www.kaggle.com/austinreese/usa-housing-listings) on July 27th, 2020. It contains rental listing data scraped from the classifieds website [Craigslist.org](https://www.craigslist.org). 
+
+After trimming, the data set includes 17 variables:
+
+* price (Response Variable)  
+* region  
+* type (housing type: apartment, condo, house, etc)  
+* sqft  
+* beds  
+* baths  
+* cats_allowed  
+* dogs_allowed  
+* smoking_allowed  
+* wheelchair_access  
+* electric vehicle charge  
+* comes furnished  
+* laundry options  
+* parking options  
+* lat  
+* long  
+* state  
+
+The data set contains `r nrow(housing)` observations. This dataset is interesting due to its inclusion of variables representing a rental listing's "features", e.g. are pets allowed, is smoking allowed, does it come furnished, etc, as well as data on the geographic region. Given these, we can explore questions such as the following:
+
+* Controlling for region and square footage, if a renter is considering getting a pet, how much (if at all) will this increase their expected rent? 
+
+* Controlling for region and square footage, if a landlord is considering adding on-premise laundry, how much (if at all) will they be able to increase rent?
+
+The goal of the model will be understanding how these "features" of a rental property affect price. As such, we are somewhat less concerned with the predictive accuracy of the model than we are with making interpretable inferences. 
+
+# Methods
+
+>The methods section should contain the bulk of your “work.” This section will contain the bulk of the R code that is used to generate the results. Your R code is not expected to be perfect idiomatic R, but it is expected to be understood by a reader without too much effort. Use RMarkdown and code comments to your advantage to explain your code if needed.
+
+>This section should contain any information about data preparation that is performed to the original data before modelling. Then you will apply methods seen in class, which may include some of the following but are not limited to:
+
+>Multiple linear regression
+>Dummy variables
+>Interaction
+>Residual diagnostics
+>Outlier diagnostics
+>Transformations
+>Polynomial regression
+>Model selection
+
+>Your task is not to use as many methods as possible. Your task is to use appropriate methods to find a good model that can correctly answer a question about the dataset, and then to communicate your result effectively. Some possible items to be discussed:
+
+>Description of the original data file including description of all relevant variables.
+>Description of additional data preparation that you performed.
+>Description of the process you chose to follow.
+>Narrative of your step-by-step decision making process throughout the analysis as you adjusted the model and attempted to validate model assumptions.
+
+## Cleaning
+
+To clean the prepare the data set for analysis, we will perform the following steps:
+
+* We remove a few columns from the dataset that represent various Craigslist metadata that we will not use in analysis. These are:
+    * ID
+    * url
+    * region_url
+    * image_url
+* We also remove the description data, which includes the text description of the property. This field may include interesting information, but would require parsing of the free-form text field into usable variables, and is beyond the scope of this analysis.  
+* We cast boolean "dummy" variales as factors.
+
+```{r}
+housing_cleaned <- housing %>%
+  select(
+    -c(
+      id, 
+      url, 
+      region_url,
+      image_url,
+      description)
+    ) %>%
+  mutate(
+    type = as.factor(type),
+    region = as.factor(region),
+    beds = as.factor(beds),
+    baths = as.factor(baths),
+    cats_allowed = as.factor(cats_allowed),
+    dogs_allowed = as.factor(dogs_allowed),
+    smoking_allowed = as.factor(smoking_allowed),
+    wheelchair_access = as.factor(wheelchair_access),
+    electric_vehicle_charge = as.factor(electric_vehicle_charge),
+    comes_furnished = as.factor(comes_furnished),
+    laundry_options = as.factor(laundry_options),
+    parking_options = as.factor(parking_options))
+```
+
+## Exploratory analysis
+
+Our dataset contains many categorical variables, which we will refer to as factors to align with the R programming language's terminology. We will begin by examining the category-level frequencies of these variables. If we find that some categories (i.e. levels) have very few observations, we may filter them out of our dataset. This filtering has both a practical purpose - when we later split our data into train and test sets, we do not end up with all of the observations of a certain level appearing only in the test set, in which case, we would not be able to generate predictions for that  factor level - and a theoretical purpose - with too few observations, our model will likely overfit to that factor level. 
+
+```{r}
+with(housing_cleaned, table(state))
+with(housing_cleaned, table(type))
+with(housing_cleaned, table(beds))
+with(housing_cleaned, table(baths))
+with(housing_cleaned, table(cats_allowed))
+with(housing_cleaned, table(dogs_allowed))
+with(housing_cleaned, table(smoking_allowed))
+with(housing_cleaned, table(wheelchair_access))
+with(housing_cleaned, table(electric_vehicle_charge))
+with(housing_cleaned, table(comes_furnished))
+with(housing_cleaned, table(laundry_options))
+with(housing_cleaned, table(parking_options))
+```
+
+Based on the above, we'll take a few additional data cleaning steps:
+
+* Remove observations where the  `type` is `land` or `assisted living`, since there are only a handful of each.
+
+* Remove the obsercations with `beds` counts of 1000 and 2000
+
+* Remove observations with `baths` counts above 6.
+
+```{r}
+housing_cleaned <- housing_cleaned %>%
+  filter(
+    !type %in% c('land', 'assisted living'),
+    !beds %in% c(1000, 2000),
+    !baths %in% c(6.5, 7, 7.5, 8, 8.5, 25, 35, 75))
+```
+
+There are many (`r length(levels(housing_cleaned$region))`) levels of the `region` factor, so we'll rank the counts to see if any should be filterd out:
+
+```{r}
+housing_cleaned %>% 
+  group_by(region) %>%
+  summarise(n = n()) %>%
+  arrange(n)
+```
+
+# TODO
+
+* filter out regions with very low counts
+
+* histograms for numeric variables
+
