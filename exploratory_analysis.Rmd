@@ -148,15 +148,109 @@ housing_cleaned <- housing_cleaned %>%
 There are many (`r length(levels(housing_cleaned$region))`) levels of the `region` factor, so we'll rank the counts to see if any should be filterd out:
 
 ```{r}
-housing_cleaned %>% 
+n_by_region <- housing_cleaned %>% 
   group_by(region) %>%
   summarise(n = n()) %>%
-  arrange(n)
+  arrange(desc(n))
+
+n_by_region
 ```
 
-# TODO
+```{r}
+regions_to_keep <- n_by_region %>% 
+  filter(n > 300)
 
-* filter out regions with very low counts
+housing_cleaned %>% 
+  filter(region %in% regions_to_keep)
+```
+Next, we'll examine the numeric columms, of which there are only two, the predictor `sqft` and the response `price`.
 
-* histograms for numeric variables
+```{r}
+ggplot(housing_cleaned, aes(x=sqfeet)) + 
+  geom_density() +
+  xlab('Square feet') +
+  ylab('Density') +
+  ggtitle('Density plot of square footage')
+
+summary(housing_cleaned$sqfeet)
+```
+
+There are clearly some errouneous `sqrt` values. We'll apply some domain knowledge here and simply filter out any values >5000 square feet.
+
+```{r}
+housing_cleaned <- housing_cleaned %>% filter(sqfeet < 5000)
+ggplot(housing_cleaned, aes(x=sqfeet)) + geom_density()
+```
+
+```{r}
+ggplot(housing_cleaned, aes(x=price)) + geom_density()
+summary(housing_cleaned$price)
+```
+
+Similiarly, it is unrealistic to have `prices` very close to 0 or in millions, so we can conclude these are erroneous. To get a better sense of our distribution, we'll remove any obviously erroneous values by filtering to where price is greater than 0 and less than 10k.
+
+```{r}
+#low_cuttoff <- median(housing_cleaned$price) - sd(housing_cleaned$price)*4
+#high_cuttoff <- median(housing_cleaned$price) + sd(housing_cleaned$price)*4
+housing_cleaned <- housing_cleaned %>% 
+  filter(price > 0,
+         price < 10000)
+
+ggplot(housing_cleaned, aes(x=price)) + geom_density()
+summary(housing_cleaned$price)
+```
+
+Now we get a sense of the price distribution. The trick now is to distinguish between values that are still "mistakes" vs. values that are correct, but outliers, which we may not want to remove. To accomplish this, we will apply one more filter that removes values that are greater than 4 standard deviations from the mean, or less than 300 (we cannot use "standard deviations from the mean" as the minimum filter, because it will be <0).
+
+```{r}
+high_cuttoff <- mean(housing_cleaned$price) + sd(housing_cleaned$price)*3
+
+housing_cleaned <- housing_cleaned %>% 
+  filter(price > 300,
+         price < high_cuttoff)
+
+ggplot(housing_cleaned, aes(x=price)) + 
+  geom_density() +
+  xlab('Price') +
+  ylab('Density') +
+  ggtitle('Density plot of price')
+
+summary(housing_cleaned$price)
+```
+
+## Correlations
+
+Now that we've concluded our univariate data analysis and data cleaning, we can begin exploratory analysis into correlations. This will give us an idea of what to expect from our models. Since so many of our predictors are categorical, we'll make heavy use of boxplots.
+
+```{r}
+ggplot(housing_cleaned, aes(x=type, y=price)) + geom_boxplot() + ggtitle('Price v. Type')
+ggplot(housing_cleaned, aes(x=beds, y=price)) + geom_boxplot() + ggtitle('Price v. Beds')
+ggplot(housing_cleaned, aes(x=baths, y=price)) + geom_boxplot() + ggtitle('Price v. Baths')
+ggplot(housing_cleaned, aes(x=cats_allowed, y=price)) + geom_boxplot() + ggtitle('Price v. Cats Allowed')
+ggplot(housing_cleaned, aes(x=dogs_allowed, y=price)) + geom_boxplot() + ggtitle('Price v. Dogs Allowed')
+ggplot(housing_cleaned, aes(x=smoking_allowed, y=price)) + geom_boxplot() + ggtitle('Price v. Smoking Allowed')
+ggplot(housing_cleaned, aes(x=wheelchair_access, y=price)) + geom_boxplot() + ggtitle('Price v. Wheelchair Access')
+ggplot(housing_cleaned, aes(x=electric_vehicle_charge, y=price)) + geom_boxplot() + ggtitle('Price v. Electric Vehicle Charge')
+ggplot(housing_cleaned, aes(x=comes_furnished, y=price)) + geom_boxplot() + ggtitle('Price v. Comes Furnished')
+ggplot(housing_cleaned, aes(x=laundry_options, y=price)) + geom_boxplot() + ggtitle('Price v. Laundry Options')
+```
+
+```{r}
+ggplot(housing_cleaned, aes(x=sqfeet, y=price)) + geom_point() + ggtitle('Square feet v. Type')
+```
+
+Judging by the bivariate correlations only (without "controlling" for any other predictors), we observe the following:
+
+* Price varies by property type, e.g. "condos" fetch higher rents than "apartments"  
+* Price generally increaes with number of beds  
+* Price generally increases with number of bats  
+* There is not an obvious difference in price by pet allowance  
+* Price decreases for properties where smoking is allowed  
+* Prices are higher for properties with wheelchair access  
+* Price is considerably higher for properties with elecric vechicle charge  
+* There is not obvious difference in price for furnished vs. unfurnished properties  
+* Price is higher when a washer/dryer is in-unit  
+
+## Models
+
 
