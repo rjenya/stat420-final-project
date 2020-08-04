@@ -15,13 +15,6 @@ housing <- read.csv('housing.csv')
 
 # Introduction
 
-Proejct prompt (to be removed prior to submitting):
-
->The introduction section should relay what you are attempting to accomplish. It would include a statement of the business, science, research, or personal interest you have that leads to analyzing the data you’ve chosen. It should provide enough background to your work such that a reader would not need to load your data to understand your report. Like the simulation project, you can assume the reader is familiar with the course concepts, >but not your data. Some things to consider:
-
->What is this data? Where did it come from? What are the variables? Why is it interesting to you?
->Why are you creating a model for this data? What is the goal of this model?
-
 This dataset was accessed from the [Kaggle.com dataset repository](https://www.kaggle.com/austinreese/usa-housing-listings) on July 27th, 2020. It contains rental listing data scraped from the classifieds website [Craigslist.org](https://www.craigslist.org). 
 
 After trimming, the data set includes 17 variables:
@@ -40,39 +33,16 @@ After trimming, the data set includes 17 variables:
 * comes furnished  
 * laundry options  
 * parking options  
-* lat  
-* long  
-* state  
 
-The data set contains `r nrow(housing)` observations. This dataset is interesting due to its inclusion of variables representing a rental listing's "features", e.g. are pets allowed, is smoking allowed, does it come furnished, etc, as well as data on the geographic region. Given these, we can explore questions such as the following:
+The data set contains `r nrow(housing)` observations. This dataset is interesting due to its inclusion of variables representing a rental listing's "features", e.g. are pets allowed, is smoking allowed, does it come furnished, etc, as well as variables that provide context about the listing, such as geographic location and square footage. With this dataset, we can explore questions such as the following:
 
-* Controlling for region and square footage, if a renter is considering getting a pet, how much (if at all) will this increase their expected rent? 
+* Controlling for geographic location and square footage, if a renter is considering getting a pet, how much (if at all) will this increase their expected rent? 
 
-* Controlling for region and square footage, if a landlord is considering adding on-premise laundry, how much (if at all) will they be able to increase rent?
+* Controlling for geographic location and square footage, if a landlord is considering adding on-premise laundry, how much (if at all) will they be able to increase rent?
 
-The goal of the model will be understanding how these "features" of a rental property affect price. As such, we are somewhat less concerned with the predictive accuracy of the model than we are with making interpretable inferences. 
+The goal of the model will be understanding how these "features" of a rental property affect price. As such, we are less concerned with optimizing the predictive performance of the model than we are with making interpretable inferences. 
 
 # Methods
-
->The methods section should contain the bulk of your “work.” This section will contain the bulk of the R code that is used to generate the results. Your R code is not expected to be perfect idiomatic R, but it is expected to be understood by a reader without too much effort. Use RMarkdown and code comments to your advantage to explain your code if needed.
-
->This section should contain any information about data preparation that is performed to the original data before modelling. Then you will apply methods seen in class, which may include some of the following but are not limited to:
-
->Multiple linear regression
->Dummy variables
->Interaction
->Residual diagnostics
->Outlier diagnostics
->Transformations
->Polynomial regression
->Model selection
-
->Your task is not to use as many methods as possible. Your task is to use appropriate methods to find a good model that can correctly answer a question about the dataset, and then to communicate your result effectively. Some possible items to be discussed:
-
->Description of the original data file including description of all relevant variables.
->Description of additional data preparation that you performed.
->Description of the process you chose to follow.
->Narrative of your step-by-step decision making process throughout the analysis as you adjusted the model and attempted to validate model assumptions.
 
 ## Cleaning
 
@@ -84,16 +54,27 @@ To clean the prepare the data set for analysis, we will perform the following st
     * region_url
     * image_url
 * We also remove the description data, which includes the text description of the property. This field may include interesting information, but would require parsing of the free-form text field into usable variables, and is beyond the scope of this analysis.  
+* For similiar reasons, we will remove the lat/long variables  
 * We cast boolean "dummy" variales as factors.
+
+We will also filter the dataset to a single region, Jacksonville FL, and remove the region feature. We decided to perform this step after exploring initial models which included `region` as a factor variable (for which there are `r length(levels(as.factor(housing$region)))` levels). This was difficult to manage, and the models violated the equal variance assumption of linear regression. We were not able to solve this issue through transformations. 
+
+However, we cannot ignore the effect of location. For example, if we wanted an estimate for how much on-site laundry can increase rent, it is important to remove the effect of location. Maybe listings in rural areas are more likely to have on-site laundry than listings in major cities, such that it would appear that on-site laundry is associated with lower rental price. After controlling for region, we would find that it is in fact associated with higher rental price. 
+
+Our compromise is to remove the `region` factor, and simply focus the analysis on a single geographic region.
 
 ```{r}
 housing_cleaned <- housing %>%
+  filter(region == 'jacksonville',
+         state == 'fl') %>%
   select(
     -c(
       id, 
       url, 
       region_url,
       image_url,
+      lat,
+      long,
       description)
     ) %>%
   mutate(
@@ -110,12 +91,13 @@ housing_cleaned <- housing %>%
     parking_options = as.factor(parking_options))
 ```
 
+Our cleaned dataset now has `r nrow(housing_cleaned)` rows.
+
 ## Exploratory analysis
 
-Our dataset contains many categorical variables, which we will refer to as factors to align with the R programming language's terminology. We will begin by examining the category-level frequencies of these variables. If we find that some categories (i.e. levels) have very few observations, we may filter them out of our dataset. This filtering has both a practical purpose - when we later split our data into train and test sets, we do not end up with all of the observations of a certain level appearing only in the test set, in which case, we would not be able to generate predictions for that  factor level - and a theoretical purpose - with too few observations, our model will likely overfit to that factor level. 
+Our dataset contains many categorical variables, which we will refer to as factors to align with the R programming language's terminology. We will begin by examining the category-level frequencies of these factors. 
 
 ```{r}
-with(housing_cleaned, table(state))
 with(housing_cleaned, table(type))
 with(housing_cleaned, table(cats_allowed))
 with(housing_cleaned, table(dogs_allowed))
@@ -125,32 +107,6 @@ with(housing_cleaned, table(electric_vehicle_charge))
 with(housing_cleaned, table(comes_furnished))
 with(housing_cleaned, table(laundry_options))
 with(housing_cleaned, table(parking_options))
-```
-
-Based on the above, we'll remove observations where the  `type` is `land` or `assisted living`, since there are only a handful of each.
-
-```{r}
-housing_cleaned <- housing_cleaned %>%
-  filter(!type %in% c('land', 'assisted living'))
-```
-
-There are many (`r length(levels(housing_cleaned$region))`) levels of the `region` factor, so we'll rank the counts to see if any should be filterd out:
-
-```{r}
-n_by_region <- housing_cleaned %>% 
-  group_by(region) %>%
-  summarise(n = n()) %>%
-  arrange(desc(n))
-
-n_by_region
-```
-
-```{r}
-regions_to_keep <- n_by_region %>% 
-  filter(n > 300) 
-
-housing_cleaned <- housing_cleaned %>% 
-  filter(region %in% regions_to_keep$region)
 ```
 
 Next, we'll examine the numeric columms, of which there are four: the predictors `sqft`, `beds` and `baths`, and the response `price`.
@@ -165,27 +121,20 @@ ggplot(housing_cleaned, aes(x=sqfeet)) +
 summary(housing_cleaned$sqfeet)
 ```
 
-There are clearly some errouneous `sqrt` values. We'll apply some domain knowledge here and simply filter out any values >5000 square feet.
-
-```{r}
-housing_cleaned <- housing_cleaned %>% filter(sqfeet < 5000)
-ggplot(housing_cleaned, aes(x=sqfeet)) + geom_density()
-```
-
-Although beds and baths are numeric, they have a small number if unique values, so we'll simply count up the instances of each distinct value to see if there are any outliers we need to remove.
+Although beds and baths are numeric, they have a small number of unique values, so we'll simply count up the instances of each distinct value to see if there are any outliers we need to remove.
 
 ```{r}
 with(housing_cleaned, table(beds))
 with(housing_cleaned, table(baths))
 ```
 
-* Remove the observations with `beds` counts of 1000 and 2000  
-* Remove observations with `baths` counts above 6.
+It is safe to assume that the listing with 0 beds or baths are "missing" or input errors, so we will remove those observations.
+
 
 ```{r}
 housing_cleaned <- housing_cleaned %>%
-  filter(beds < 1000,
-         baths < 6)
+  filter(beds > 0,
+         baths > 0)
 
 ggplot(housing_cleaned, aes(x=beds)) + geom_histogram() + ggtitle('Histogram of number of beds')
 ggplot(housing_cleaned, aes(x=baths)) + geom_histogram() + ggtitle('Histogram of number of baths')
@@ -196,36 +145,7 @@ ggplot(housing_cleaned, aes(x=price)) + geom_density()
 summary(housing_cleaned$price)
 ```
 
-Similiarly, it is unrealistic to have `prices` very close to 0 or in the millions, so we can conclude that these are erroneous. To get a better sense of our distribution, we'll remove any obviously erroneous values by filtering to where price is greater than 0 and less than 10k.
-
-```{r}
-#low_cuttoff <- median(housing_cleaned$price) - sd(housing_cleaned$price)*4
-#high_cuttoff <- median(housing_cleaned$price) + sd(housing_cleaned$price)*4
-housing_cleaned <- housing_cleaned %>% 
-  filter(price > 0,
-         price < 10000)
-
-ggplot(housing_cleaned, aes(x=price)) + geom_density()
-summary(housing_cleaned$price)
-```
-
-Now we get a sense of the price distribution. The trick now is to distinguish between values that are still "mistakes" vs. values that are correct, but outliers, which we may not want to remove. To accomplish this, we will apply one more filter that removes values that are greater than 4 standard deviations from the mean, or less than 300 (we cannot use "standard deviations from the mean" as the minimum filter, because it will be <0).
-
-```{r}
-high_cuttoff <- mean(housing_cleaned$price) + sd(housing_cleaned$price)*3
-
-housing_cleaned <- housing_cleaned %>% 
-  filter(price > 300,
-         price < high_cuttoff)
-
-ggplot(housing_cleaned, aes(x=price)) + 
-  geom_density() +
-  xlab('Price') +
-  ylab('Density') +
-  ggtitle('Density plot of price')
-
-summary(housing_cleaned$price)
-```
+The distribution of `price` is right-skewed - we'll likely explore transformations in the model fitting stage.
 
 ## Correlations
 
@@ -251,26 +171,28 @@ ggplot(housing_cleaned, aes(x=sqfeet, y=price)) + geom_point() + ggtitle('Square
 
 Judging by the bivariate correlations only (without "controlling" for any other predictors), we observe the following:
 
-* Price varies by property type, e.g. "condos" fetch higher rents than "apartments"  
 * Price generally increaes with number of beds  
-* Price generally increases with number of baths  
-* There is not an obvious difference in price by pet allowance  
-* Price decreases for properties where smoking is allowed  
-* Prices are higher for properties with wheelchair access  
-* Price is considerably higher for properties with electric vechicle charge  
-* There is not obvious difference in price for furnished vs. unfurnished properties  
-* Price is higher when a washer/dryer is in-unit  
+* Price generally increases with number of baths    
+* Price genereally increases with square footage  
+* Price varies by property type, e.g. "condos" fetch higher rents than "apartments"  
+* Prices appear to be higher for listings where pets are *not* allowed  
+* Prices are lower on listings where smoking is allowed  
+* Prices are not obviously different for listings with wheelchair access  
+* Prices are considerably higher for listings with electric vechicle charge  
+* Prices are higher for furnished vs. unfurnished listings  
+* Price is higher when a washer/dryer is in-unit/there are in-unit hookups available
 
 ## Models - Control variables
 
-As a reminder, our goal in this analysis is to estimate the mean change in expected rental price when a rental property has certain amenities (e.g. in-unit laundry) or allowances, such as dogs. To understand the association of an amnenity such as "in-unit laundry", it will be important to "control for" things like location, square footage, and beds/baths. For example, if we wanted an estimate for how much on-site laundry can increase rent, it is important to remove the effect of location. For example, maybe listings in rural areas are more likely to have on-site laundry than listings in major cities, such that it would appear that on-site laundry is associated with lower rental price. After controlling for region, we would find that it is in fact associated with higher rental price. 
+As a reminder, our goal in this analysis is to estimate the mean change in expected rental price when a rental property has certain amenities (e.g. in-unit laundry) or allowances, such as dogs. To understand the association of an amnenity such as "in-unit laundry", it will be important to "control for" things like location, square footage, and beds/baths. 
 
 We'll consider the following variables the "control" variables:  
 * beds  
 * baths  
 * square footage  
-* region  
 * property type
+
+Geographical location is implicitly controlled for, since our data set includes only listings in Jacksonville, FL. 
 
 We are less interested in the specific coefficients from these variables - we simply want to make sure we are adjusting for them when analyzing our variables of interest. Since there are so many levels for the `region` factor, we will not print out those coefficeints. 
 
@@ -280,14 +202,13 @@ mod_control_variables <- lm(
     sqfeet +
     beds + 
     baths +
-    type +
-    region,
+    type,
   data = housing_cleaned)
 
-summary(mod_control_variables)$coefficients[1:13,]
+summary(mod_control_variables)$coefficients
 ```
 
-These coefficient estimates are mostly intuitive and expected. The one surprising result is that the coefficients for `beds` is negative - we can see that the direction of the association between `beds` and `price` flips from postivie to negative when we add `sqfeet`. 
+These coefficient estimates are mostly intuitive and expected. The one surprising result is that the coefficients for `beds` is negative - we can see that the direction of the association between `beds` and `price` flips from postivie to negative when we add `sqfeet` to the model.
 
 ```{r}
 summary(lm(price ~ beds, data=housing_cleaned))$coefficients
