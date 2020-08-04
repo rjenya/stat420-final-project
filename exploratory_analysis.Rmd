@@ -215,5 +215,44 @@ summary(lm(price ~ beds, data=housing_cleaned))$coefficients
 summary(lm(price ~ beds + sqfeet, data=housing_cleaned))$coefficients
 ```
 
+This could be caused by collinearity, which we check below.
+
+```{r}
+
+vif(mod_control_variables)
+```
+
+Although `sqfeet` and `beds` are somewhat correlated, the VIF values of ~3 are acceptable, so the flipping of the sign does not appear to be due to collinearity. The below plot shows what is happening.
+
+```{r}
+tmp_data_for_plot <- housing_cleaned %>%
+  mutate(sq_feet_ntile = ntile(sqfeet, 5)) %>%
+  select(sq_feet_ntile,
+         sqfeet,
+         price,
+         beds)
+
+ggplot(tmp_data_for_plot, aes(x=as.factor(beds), y=price)) +
+  geom_boxplot() +
+  facet_wrap(~as.factor(sq_feet_ntile)) +
+  xlab('Number of beds') +
+  ylab('Price') +
+  ggtitle('Price vs. Number of beds, facetted by square foot quintile')
+```
+
+When we facet the price vs. beds by square foot quintile, we see that the number of beds and price are in fact somewhat negatively correlated *within each quintile*. In other words, adding bedrooms while holding square footage constant decreases the price. This is inuitive, in that the size of each indidivudal bedroom becomes smaller, which devalues the property. 
+
 ## Models - variables of interest
+
+```{r}
+mod_control_variables <- lm(
+  price ~ 
+    sqfeet +
+    beds + 
+    baths +
+    type,
+  data = housing_cleaned)
+
+#summary(mod_control_variables)$coefficients
+```
 
