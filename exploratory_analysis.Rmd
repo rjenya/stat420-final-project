@@ -8,6 +8,7 @@ output:
 ```{r message=FALSE, warning=FALSE}
 library(dplyr)
 library(ggplot2)
+library(faraway)
 
 housing <- read.csv('housing.csv')
 ```
@@ -98,8 +99,7 @@ housing_cleaned <- housing %>%
   mutate(
     type = as.factor(type),
     region = as.factor(region),
-    beds = as.factor(beds),
-    baths = as.factor(baths),
+    state = as.factor(state),
     cats_allowed = as.factor(cats_allowed),
     dogs_allowed = as.factor(dogs_allowed),
     smoking_allowed = as.factor(smoking_allowed),
@@ -117,8 +117,6 @@ Our dataset contains many categorical variables, which we will refer to as facto
 ```{r}
 with(housing_cleaned, table(state))
 with(housing_cleaned, table(type))
-with(housing_cleaned, table(beds))
-with(housing_cleaned, table(baths))
 with(housing_cleaned, table(cats_allowed))
 with(housing_cleaned, table(dogs_allowed))
 with(housing_cleaned, table(smoking_allowed))
@@ -129,34 +127,291 @@ with(housing_cleaned, table(laundry_options))
 with(housing_cleaned, table(parking_options))
 ```
 
-Based on the above, we'll take a few additional data cleaning steps:
-
-* Remove observations where the  `type` is `land` or `assisted living`, since there are only a handful of each.
-
-* Remove the obsercations with `beds` counts of 1000 and 2000
-
-* Remove observations with `baths` counts above 6.
+Based on the above, we'll remove observations where the  `type` is `land` or `assisted living`, since there are only a handful of each.
 
 ```{r}
 housing_cleaned <- housing_cleaned %>%
-  filter(
-    !type %in% c('land', 'assisted living'),
-    !beds %in% c(1000, 2000),
-    !baths %in% c(6.5, 7, 7.5, 8, 8.5, 25, 35, 75))
+  filter(!type %in% c('land', 'assisted living'))
 ```
 
 There are many (`r length(levels(housing_cleaned$region))`) levels of the `region` factor, so we'll rank the counts to see if any should be filterd out:
 
 ```{r}
-housing_cleaned %>% 
+n_by_region <- housing_cleaned %>% 
   group_by(region) %>%
   summarise(n = n()) %>%
-  arrange(n)
+  arrange(desc(n))
+
+n_by_region
 ```
 
-# TODO
+```{r}
+regions_to_keep <- n_by_region %>% 
+  filter(n > 300) 
 
-* filter out regions with very low counts
+housing_cleaned <- housing_cleaned %>% 
+  filter(region %in% regions_to_keep$region)
+```
 
-* histograms for numeric variables
+Next, we'll examine the numeric columms, of which there are four: the predictors `sqft`, `beds` and `baths`, and the response `price`.
+
+```{r}
+ggplot(housing_cleaned, aes(x=sqfeet)) + 
+  geom_density() +
+  xlab('Square feet') +
+  ylab('Density') +
+  ggtitle('Density plot of square footage')
+
+summary(housing_cleaned$sqfeet)
+```
+
+There are clearly some errouneous `sqrt` values. We'll apply some domain knowledge here and simply filter out any values >5000 square feet.
+
+```{r}
+housing_cleaned <- housing_cleaned %>% filter(sqfeet < 5000)
+ggplot(housing_cleaned, aes(x=sqfeet)) + geom_density()
+```
+
+Although beds and baths are numeric, they have a small number if unique values, so we'll simply count up the instances of each distinct value to see if there are any outliers we need to remove.
+
+```{r}
+with(housing_cleaned, table(beds))
+with(housing_cleaned, table(baths))
+```
+
+* Remove the observations with `beds` counts of 1000 and 2000  
+* Remove observations with `baths` counts above 6.
+
+```{r}
+housing_cleaned <- housing_cleaned %>%
+  filter(beds < 1000,
+         baths < 6)
+
+ggplot(housing_cleaned, aes(x=beds)) + geom_histogram() + ggtitle('Histogram of number of beds')
+ggplot(housing_cleaned, aes(x=baths)) + geom_histogram() + ggtitle('Histogram of number of baths')
+```
+
+```{r}
+ggplot(housing_cleaned, aes(x=price)) + geom_density()
+summary(housing_cleaned$price)
+```
+
+Similiarly, it is unrealistic to have `prices` very close to 0 or in the millions, so we can conclude that these are erroneous. To get a better sense of our distribution, we'll remove any obviously erroneous values by filtering to where price is greater than 0 and less than 10k.
+
+```{r}
+#low_cuttoff <- median(housing_cleaned$price) - sd(housing_cleaned$price)*4
+#high_cuttoff <- median(housing_cleaned$price) + sd(housing_cleaned$price)*4
+housing_cleaned <- housing_cleaned %>% 
+  filter(price > 0,
+         price < 10000)
+
+ggplot(housing_cleaned, aes(x=price)) + geom_density()
+summary(housing_cleaned$price)
+```
+
+Now we get a sense of the price distribution. The trick now is to distinguish between values that are still "mistakes" vs. values that are correct, but outliers, which we may not want to remove. To accomplish this, we will apply one more filter that removes values that are greater than 4 standard deviations from the mean, or less than 300 (we cannot use "standard deviations from the mean" as the minimum filter, because it will be <0).
+
+```{r}
+high_cuttoff <- mean(housing_cleaned$price) + sd(housing_cleaned$price)*3
+
+housing_cleaned <- housing_cleaned %>% 
+  filter(price > 300,
+         price < high_cuttoff)
+
+ggplot(housing_cleaned, aes(x=price)) + 
+  geom_density() +
+  xlab('Price') +
+  ylab('Density') +
+  ggtitle('Density plot of price')
+
+summary(housing_cleaned$price)
+```
+
+## Correlations
+
+Now that we've concluded our univariate data analysis and data cleaning, we can begin exploratory analysis into correlations. This will give us an idea of what to expect from our models. Since so many of our predictors are categorical and our response is numeric, we'll make heavy use of boxplots.
+
+```{r}
+ggplot(housing_cleaned, aes(x=type, y=price)) + geom_boxplot() + ggtitle('Price v. Type')
+ggplot(housing_cleaned, aes(x=cats_allowed, y=price)) + geom_boxplot() + ggtitle('Price v. Cats Allowed')
+ggplot(housing_cleaned, aes(x=dogs_allowed, y=price)) + geom_boxplot() + ggtitle('Price v. Dogs Allowed')
+ggplot(housing_cleaned, aes(x=smoking_allowed, y=price)) + geom_boxplot() + ggtitle('Price v. Smoking Allowed')
+ggplot(housing_cleaned, aes(x=wheelchair_access, y=price)) + geom_boxplot() + ggtitle('Price v. Wheelchair Access')
+ggplot(housing_cleaned, aes(x=electric_vehicle_charge, y=price)) + geom_boxplot() + ggtitle('Price v. Electric Vehicle Charge')
+ggplot(housing_cleaned, aes(x=comes_furnished, y=price)) + geom_boxplot() + ggtitle('Price v. Comes Furnished')
+ggplot(housing_cleaned, aes(x=laundry_options, y=price)) + geom_boxplot() + ggtitle('Price v. Laundry Options')
+ggplot(housing_cleaned, aes(x=parking_options, y=price)) + geom_boxplot() + ggtitle('Price v. Parking Options')
+```
+
+```{r}
+ggplot(housing_cleaned, aes(x=as.factor(beds), y=price)) + geom_boxplot() + ggtitle('Price v. Beds')
+ggplot(housing_cleaned, aes(x=as.factor(baths), y=price)) + geom_boxplot() + ggtitle('Price v. Baths')
+ggplot(housing_cleaned, aes(x=sqfeet, y=price)) + geom_point() + ggtitle('Square footage v. Price')
+```
+
+Judging by the bivariate correlations only (without "controlling" for any other predictors), we observe the following:
+
+* Price varies by property type, e.g. "condos" fetch higher rents than "apartments"  
+* Price generally increaes with number of beds  
+* Price generally increases with number of baths  
+* There is not an obvious difference in price by pet allowance  
+* Price decreases for properties where smoking is allowed  
+* Prices are higher for properties with wheelchair access  
+* Price is considerably higher for properties with electric vechicle charge  
+* There is not obvious difference in price for furnished vs. unfurnished properties  
+* Price is higher when a washer/dryer is in-unit  
+
+## Models - Control variables
+
+As a reminder, our goal in this analysis is to estimate the mean change in expected rental price when a rental property has certain amenities (e.g. in-unit laundry) or allowances, such as dogs. To understand the association of an amnenity such as "in-unit laundry", it will be important to "control for" things like location, square footage, and beds/baths. For example, if we wanted an estimate for how much on-site laundry can increase rent, it is important to remove the effect of location. For example, maybe listings in rural areas are more likely to have on-site laundry than listings in major cities, such that it would appear that on-site laundry is associated with lower rental price. After controlling for region, we would find that it is in fact associated with higher rental price. 
+
+We'll consider the following variables the "control" variables:  
+* beds  
+* baths  
+* square footage  
+* region  
+* property type
+
+We are less interested in the specific coefficients from these variables - we simply want to make sure we are adjusting for them when analyzing our variables of interest. Since there are so many levels for the `region` factor, we will not print out those coefficeints. 
+
+```{r}
+mod_control_variables <- lm(
+  price ~ 
+    sqfeet +
+    beds + 
+    baths +
+    type +
+    region,
+  data = housing_cleaned)
+
+summary(mod_control_variables)$coefficients[1:13,]
+```
+
+These coefficient estimates are mostly intuitive and expected. The one surprising result is that the coefficients for `beds` is negative - we can see that the direction of the association between `beds` and `price` flips from postivie to negative when we add `sqfeet`. 
+
+```{r}
+summary(lm(price ~ beds, data=housing_cleaned))$coefficients
+summary(lm(price ~ beds + sqfeet, data=housing_cleaned))$coefficients
+```
+
+## Models - variables of interest
+
+
+Model is difficult to work with because of all the different region levels - model coefficients.
+We didn't manage to make it behave lineary (Fitted vs. Residuals plot had a visible patterm). We do care a lot about model assumptions because our goal is to perform inference, to determine if a particular predictor is important.
+So we've decided to concentrate on one biggest region - 'jacksonville'
+
+
+```{r}
+housing_cleaned = housing_cleaned[housing_cleaned$region == 'jacksonville',]
+nrow(housing_cleaned)
+```
+
+
+Turns out there is also Jacksonville in North Carolina - we don't want this one
+
+```{r}
+housing_cleaned = housing_cleaned[housing_cleaned$state == 'fl',]
+nrow(housing_cleaned)
+```
+
+Now we can fit our model on controlled location data
+
+```{r}
+model_all_variables = lm(formula = 
+price ~ 
+sqrt(sqfeet) + beds + baths +
+    type +
+ # (lat + long)^2 +
+  cats_allowed + 
+  dogs_allowed +
+  smoking_allowed + 
+  wheelchair_access + 
+  electric_vehicle_charge + 
+  comes_furnished + 
+  laundry_options + 
+  parking_options
+    , data = housing_cleaned)
+```
+
+Let's see whether response transformation is suggested:
+
+```{r, message=FALSE, warning=FALSE}
+library(MASS)
+boxcox(model_all_variables, plotit = TRUE, lambda = seq(-2, 1, by = 0.1))
+```
+
+Try model with response transformation
+
+```{r}
+model_all_variables_trans = lm(formula = 
+(price^-0.6 - 1)/-0.6 ~ 
+  sqrt(sqfeet) +
+  beds + 
+  baths +
+  type +
+ # (lat + long)^2 +
+  cats_allowed + 
+  dogs_allowed +
+  smoking_allowed + 
+  wheelchair_access + 
+  electric_vehicle_charge + 
+  comes_furnished + 
+  laundry_options + 
+  parking_options
+    , data = housing_cleaned)
+```
+
+Check for outliers
+
+```{r}
+housing_cleaned[cooks.distance(model_all_variables_trans) > 4/length(housing_cleaned),]
+
+```
+
+
+Check model's Linearity and Constant Variance:
+
+
+```{r}
+plot(fitted(model_all_variables_trans), resid(model_all_variables_trans), 
+       col = "darkblue", pch = 20, cex = 1.5,
+       xlab = "Fitted", ylab = "Residuals")
+abline(h = 0, lwd = 2)
+```
+
+Plot looks reasonable but Breusch-Pagan Test still rejects Constant Variance - don't know how to fix it
+
+```{r, message=FALSE, warning=FALSE}
+library(lmtest)
+bptest(model_all_variables_trans)
+```
+
+Check Normality
+```{r}
+qqnorm(resid(model_all_variables_trans))
+qqline(resid(model_all_variables_trans))
+```
+
+Q-Q plot looks reasonable but Shapiro test rejects Normality
+
+```{r}
+shapiro.test(resid(model_all_variables_trans))
+```
+
+```{r}
+vif(model_all_variables_trans)
+```
+Variance inflation factor suggests that cats_allowed & dogs_allowed have some collinearity - makes sense.
+
+
+Ready to analyse the model 
+
+```{r}
+summary(model_all_variables_trans)
+```
+
+
+
+
 
