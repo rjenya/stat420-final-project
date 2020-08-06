@@ -9,7 +9,10 @@ output:
 library(dplyr)
 library(ggplot2)
 library(faraway)
+library(knitr)
+library(broom)
 
+set.seed(20200805)
 housing <- read.csv('housing.csv')
 ```
 
@@ -244,15 +247,83 @@ When we facet the price vs. beds by square foot quintile, we see that the number
 
 ## Models - variables of interest
 
+Next we'll add our variables of interest, and confirm that the inclusion of these models is an improvement over a model with only the "control" variables. In practice, we are asking if certain features/amnenities of a rental listing helps predict price, over only the basic property facts such as square footage, number of beds, etc.
+
+We'll compare three models: 1) the "control" model, 2) a "full" model that includes all of the variables available (control + varibles of interest), and 3) the result of applying a backwards stepwise procedure on the "full" model.
+
+WHYUSE ADJUSTED R^2
+
 ```{r}
-mod_control_variables <- lm(
-  price ~ 
+control_model = lm(
+  log(price) ~ 
     sqfeet +
     beds + 
     baths +
     type,
   data = housing_cleaned)
 
-#summary(mod_control_variables)$coefficients
+full_model = lm(
+  log(price) ~ 
+    type + 
+    sqfeet + 
+    beds + 
+    baths + 
+    cats_allowed + 
+    dogs_allowed + 
+    smoking_allowed + 
+    wheelchair_access + 
+    electric_vehicle_charge + 
+    comes_furnished + 
+    laundry_options + 
+    parking_options, 
+  data = housing_cleaned)
+
+selected_model = step(full_model, direction = "backward", trace=FALSE)
+
+control_model_stats = c("Adj. R2" = summary(control_model)$adj.r.squared)
+full_model_stats = c("Adj. R2" = summary(full_model)$adj.r.squared)
+selected_model_stats = c("Adj. R2" = summary(selected_model)$adj.r.squared)
+
+kable(
+  data.frame("Control Model" = control_model_stats, 
+             "Full Model" = full_model_stats, 
+             "Selected Model" = selected_model_stats), 
+  format = "markdown", 
+  col.names = c("Control Model", "Full Model", "Selected Model"))
 ```
 
+The adjusted $R^2$ values are about equal for the "full" and "selected" models, while the selected model uses fewer variables. So, we will move forwared with the "selected" model, and check it's assumptions. 
+
+## add assumption checking commentary
+
+# Results
+
+```{r}
+summary(selected_model)
+```
+
+```{r}
+coef_plot_data <- tidy(selected_model) %>%
+  mutate(
+    ymin = estimate - (qnorm(1 - 0.05 / 2) * std.error),
+    ymax = estimate + (qnorm(1 - 0.05 / 2) * std.error)) %>%
+  filter(term != '(Intercept)')
+
+ggplot(coef_plot_data, aes(x=term, y=estimate)) + 
+  geom_hline(yintercept=0) +  
+  geom_pointrange(aes(ymin=ymin, ymax=ymax)) +
+  labs(x="Coefficient", y="Estimate", title="Coefficients from selected model") + 
+  coord_flip()
+```
+
+# Discussion
+
+We have establised that certain "features/amnenties" of a rental listing are significantly associated with price. Knowing this information helps us predict/explain price, beyond knowing the basics such as square footage, number of beds/baths, etc.
+
+This has numerous practical implications. One is that a property owner/landlord can increase the value of their rental listing (i.e. raise rent) by improvements such as in-unit laundry, improving parking options through a garage or carport etc. They can use the coefficient estimates in a cost/benefit analysis. 
+
+From a renters perspective, they can estimate how much additional rent they would expect to pay if requiring (for example) a furnished rental. 
+
+The four feature/amnenity variables that are not included in the final model are `dogs_allowed`, `smoking_allowed`, `wheelchair_access`, and `electric_vehicle_charge`. Based on our earlier exploratory analysis, we suspect `dogs_allowed` was not selected due to being fairly collinear with `cats_allowed`, and `electric_vehicle_charge` was not selected due to having only a handful of observations for listings with electric vehicle charges.
+
+### Add more discussion around the variables?
