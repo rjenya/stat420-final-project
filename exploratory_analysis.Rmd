@@ -294,7 +294,100 @@ kable(
 
 The adjusted $R^2$ values are about equal for the "full" and "selected" models, while the selected model uses fewer variables. So, we will move forwared with the "selected" model, and check it's assumptions. 
 
-## add assumption checking commentary
+## Model assumptions check
+
+We'll check for outliers first
+
+```{r}
+housing_cleaned[cooks.distance(selected_model) > 4/length(housing_cleaned),]
+
+```
+
+None of the observations are considered influential.
+
+Next we'll check model's Linearity and Constant Variance assumptions
+
+
+```{r}
+plot(fitted(selected_model), resid(selected_model), 
+       col = "darkblue", pch = 20, cex = 1.5,
+       xlab = "Fitted", ylab = "Residuals")
+abline(h = 0, lwd = 2)
+```
+
+
+```{r, message=FALSE, warning=FALSE}
+library(lmtest)
+bptest(selected_model)
+```
+
+Fitted vs. Residuals Plot looks reasonable but Breusch-Pagan Test rejects Constant Variance.
+Even though the formal test rejects the null hypothesis (Constant Variance), we are working with a relatively large number of observation and we are satisfied that the assumptions hold given the visualizations.
+
+Next we'll check Normality assumption
+
+```{r}
+qqnorm(resid(selected_model))
+qqline(resid(selected_model))
+```
+
+
+```{r}
+shapiro.test(resid(selected_model))
+```
+
+Q-Q plot has some tails but looks acceptable. Shapiro test, on the other hand, rejects Normality.
+Like most statistical significance tests, if the sample size is sufficiently large this test may detect even trivial departures from the null hypothesis. Same as above, we trust Q-Q plot and are satisfied with Normality assumtion.
+
+Lastly, we'll check whether we could use a better response transformation
+
+```{r}
+full_model_no_trans = lm(
+  price ~ 
+    type + 
+    sqfeet + 
+    beds + 
+    baths + 
+    cats_allowed + 
+    dogs_allowed + 
+    smoking_allowed + 
+    wheelchair_access + 
+    electric_vehicle_charge + 
+    comes_furnished + 
+    laundry_options + 
+    parking_options, 
+  data = housing_cleaned)
+```
+
+```{r, message=FALSE, warning=FALSE}
+library(MASS)
+boxcox(full_model_no_trans, plotit = TRUE)
+```
+```{r}
+full_model_boxcox_trans = lm(
+  (price^-0.6 - 1) / - 0.6 ~ 
+    type + 
+    sqfeet + 
+    beds + 
+    baths + 
+    cats_allowed + 
+    dogs_allowed + 
+    smoking_allowed + 
+    wheelchair_access + 
+    electric_vehicle_charge + 
+    comes_furnished + 
+    laundry_options + 
+    parking_options, 
+  data = housing_cleaned)
+selected_model_boxcox_trans = step(full_model_boxcox_trans, direction = "backward", trace=FALSE)
+```
+```{r}
+qqnorm(resid(selected_model_boxcox_trans))
+qqline(resid(selected_model_boxcox_trans))
+```
+
+We can see that boxcox transformation produced model with slightly better Normality.
+We'll continue with log response transformation model because simpler transformation makes our predictor effect analysis easier.
 
 # Results
 
